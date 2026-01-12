@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 7e23b22c826155a41b5e3d68d9e7957b
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 7400000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 302332
+  packageName: Isometric Character - Dog
+  packageVersion: 1.0
+  assetPath: Assets/Graphie/Isometric Character/Characters/Dog/Animations/Back_Idle_Sit.anim
+  uploadId: 709766
