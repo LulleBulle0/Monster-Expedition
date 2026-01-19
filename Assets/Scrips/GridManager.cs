@@ -8,7 +8,7 @@ public class GridManager : MonoBehaviour
     public int width = 10;
     public int height = 10;
 
-    // Use a List so you can edit blocked tiles in the Inspector, then copy into a HashSet for fast lookups.
+    // Use a List so tiles can be edited in the Inspector, then copy into a HashSet for lookup performance
     [SerializeField]
     private List<Vector2Int> blockedTilesFromInspector = new List<Vector2Int>();
 
@@ -26,10 +26,10 @@ public class GridManager : MonoBehaviour
 
         Instance = this;
 
-        // Populate hashset from inspector list
+        // Populate runtime hashset from inspector list
         blockedTiles = new HashSet<Vector2Int>(blockedTilesFromInspector);
 
-        // Example runtime blocked tile (kept from your original code)
+        // Example runtime blocked tile (kept from original code)
         blockedTiles.Add(new Vector2Int(2, 2));
     }
 
