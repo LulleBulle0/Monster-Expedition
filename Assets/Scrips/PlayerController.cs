@@ -1,3 +1,4 @@
+using System.Collections;
 using UnityEngine;
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
@@ -6,9 +7,29 @@ using UnityEngine.InputSystem;
 public class PlayerController : MonoBehaviour
 {
     public Vector2Int gridPosition;
+    public float moveDuration = 0.18f; // seconds to move one tile
+
+    Animator animator;
+    bool isMoving;
+
+    // Animator state names (configure in Inspector if your state names differ)
+    public string walkStateName = "Walk";
+    public string idleStateName = "Idle";
+
+    int walkStateHash;
+    int idleStateHash;
 
     void Start()
     {
+        animator = GetComponent<Animator>();
+
+        // Precompute hashes for faster crossfades
+        if (animator != null)
+        {
+            walkStateHash = Animator.StringToHash(walkStateName);
+            idleStateHash = Animator.StringToHash(idleStateName);
+        }
+
         if (GridManager.Instance == null)
         {
             Debug.LogError("GridManager.Instance is null. Make sure a GameObject in the scene has the GridManager component and it's enabled.");
@@ -29,52 +50,40 @@ public class PlayerController : MonoBehaviour
 
     void Update()
     {
-        bool moved = false;
+        if (isMoving)
+            return; // ignore input while moving
 
-        // New Input System
+#if ENABLE_INPUT_SYSTEM
         var kb = Keyboard.current;
         if (kb != null)
         {
             if (kb.wKey.wasPressedThisFrame || kb.upArrowKey.wasPressedThisFrame)
-            {
-                Move(Vector2Int.up);
-                moved = true;
-            }
-            if (kb.sKey.wasPressedThisFrame || kb.downArrowKey.wasPressedThisFrame)
-            {
-                Move(Vector2Int.down);
-                moved = true;
-            }
-            if (kb.aKey.wasPressedThisFrame || kb.leftArrowKey.wasPressedThisFrame)
-            {
-                Move(Vector2Int.left);
-                moved = true;
-            }
-            if (kb.dKey.wasPressedThisFrame || kb.rightArrowKey.wasPressedThisFrame)
-            {
-                Move(Vector2Int.right);
-                moved = true;
-            }
-
-            if (!moved && kb.anyKey.wasPressedThisFrame)
-            {
-                string pressed = "";
-                if (kb.wKey.wasPressedThisFrame) pressed += "W ";
-                if (kb.sKey.wasPressedThisFrame) pressed += "S ";
-                if (kb.aKey.wasPressedThisFrame) pressed += "A ";
-                if (kb.dKey.wasPressedThisFrame) pressed += "D ";
-                if (kb.upArrowKey.wasPressedThisFrame) pressed += "UpArrow ";
-                if (kb.downArrowKey.wasPressedThisFrame) pressed += "DownArrow ";
-                if (kb.leftArrowKey.wasPressedThisFrame) pressed += "LeftArrow ";
-                if (kb.rightArrowKey.wasPressedThisFrame) pressed += "RightArrow ";
-                Debug.Log($"New Input System detected keys: {pressed}. GameObject active: {gameObject.activeInHierarchy}, script enabled: {enabled}, GridManager.Instance present: {GridManager.Instance != null}");
-            }
+                TryMove(Vector2Int.up);
+            else if (kb.sKey.wasPressedThisFrame || kb.downArrowKey.wasPressedThisFrame)
+                TryMove(Vector2Int.down);
+            else if (kb.aKey.wasPressedThisFrame || kb.leftArrowKey.wasPressedThisFrame)
+                TryMove(Vector2Int.left);
+            else if (kb.dKey.wasPressedThisFrame || kb.rightArrowKey.wasPressedThisFrame)
+                TryMove(Vector2Int.right);
         }
-
+#else
+        if (Input.GetKeyDown(KeyCode.W) || Input.GetKeyDown(KeyCode.UpArrow))
+            TryMove(Vector2Int.up);
+        else if (Input.GetKeyDown(KeyCode.S) || Input.GetKeyDown(KeyCode.DownArrow))
+            TryMove(Vector2Int.down);
+        else if (Input.GetKeyDown(KeyCode.A) || Input.GetKeyDown(KeyCode.LeftArrow))
+            TryMove(Vector2Int.left);
+        else if (Input.GetKeyDown(KeyCode.D) || Input.GetKeyDown(KeyCode.RightArrow))
+            TryMove(Vector2Int.right);
+#endif
     }
 
-    void Move(Vector2Int direction)
+    // Wrapper to check grid and start smooth movement
+    void TryMove(Vector2Int direction)
     {
+        if (isMoving)
+            return;
+
         Vector2Int targetPos = gridPosition + direction;
 
         if (GridManager.Instance == null)
@@ -82,9 +91,6 @@ public class PlayerController : MonoBehaviour
             Debug.LogError("GridManager.Instance is null when trying to move.");
             return;
         }
-
-        // Debug info to help identify why movement doesn't happen
-        Debug.Log($"Player Move requested: from {gridPosition} to {targetPos} (dir {direction})");
 
         if (!GridManager.Instance.IsInsideGrid(targetPos))
         {
@@ -98,9 +104,75 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
-        // perform move
-        gridPosition = targetPos;
-        transform.position = GridManager.Instance.GridToWorld(gridPosition);
+        // Face the direction immediately (so rotation is responsive)
+        FaceDirection(direction);
+
+        // Begin smooth move
+        StartCoroutine(SmoothMoveToTile(targetPos));
+    }
+
+    void FaceDirection(Vector2Int dir)
+    {
+        // Convert grid direction to world-space direction
+        Vector3 worldDir = new Vector3(dir.x, 0f, dir.y);
+        if (worldDir.sqrMagnitude <= 0f)
+            return;
+
+        Quaternion targetRot = Quaternion.LookRotation(worldDir, Vector3.up);
+        transform.rotation = targetRot; // immediate facing; Smooth rotation also applied during SmoothMoveToTile
+    }
+
+    IEnumerator SmoothMoveToTile(Vector2Int targetGridPos)
+    {
+        isMoving = true;
+
+        if (animator != null)
+        {
+            // Set bool for compatibility
+            animator.SetBool("IsWalking", true);
+            // Crossfade into the walk animation on layer 0 for smooth blending
+            animator.CrossFadeInFixedTime(walkStateHash, 0.05f, 0);
+        }
+
+        Vector3 startWorld = transform.position;
+        Vector3 endWorld = GridManager.Instance.GridToWorld(targetGridPos);
+
+        Quaternion startRot = transform.rotation;
+        // Determine rotation to face travel direction smoothly
+        Vector3 travelDir = (endWorld - startWorld);
+        if (travelDir.sqrMagnitude <= 0.0001f)
+            travelDir = transform.forward;
+        Quaternion targetRot = Quaternion.LookRotation(travelDir.normalized, Vector3.up);
+
+        float elapsed = 0f;
+        while (elapsed < moveDuration)
+        {
+            elapsed += Time.deltaTime;
+            float t = Mathf.Clamp01(elapsed / moveDuration);
+            transform.position = Vector3.Lerp(startWorld, endWorld, t);
+            transform.rotation = Quaternion.Slerp(startRot, targetRot, t);
+            yield return null;
+        }
+
+        transform.position = endWorld;
+        transform.rotation = targetRot;
+        gridPosition = targetGridPos; // commit logical position at end
+
+        if (animator != null)
+        {
+            animator.SetBool("IsWalking", false);
+            // Crossfade back to idle to avoid the idle state playing additively
+            animator.CrossFadeInFixedTime(idleStateHash, 0.05f, 0);
+        }
+
+        isMoving = false;
         Debug.Log($"Player moved to {gridPosition}");
+    }
+
+    // Deprecated single-step Move kept for compatibility but unused now
+    void Move(Vector2Int direction)
+    {
+        // kept to avoid breaking other code; call TryMove instead
+        TryMove(direction);
     }
 }
