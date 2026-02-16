@@ -45,7 +45,20 @@ public class PlayerController : MonoBehaviour
         }
 
         transform.position = GridManager.Instance.GridToWorld(gridPosition);
+
+        // Register player as an occupied tile so GridManager knows this tile is taken
+        if (!GridManager.Instance.RegisterOccupant(gridPosition))
+        {
+            Debug.LogWarning($"Failed to register player at {gridPosition}. Tile may already be occupied or out of bounds.");
+        }
+
         Debug.Log($"Player initialized at {gridPosition} -> world {transform.position}");
+    }
+
+    void OnDestroy()
+    {
+        if (GridManager.Instance != null)
+            GridManager.Instance.UnregisterOccupant(gridPosition);
     }
 
     void Update()
@@ -92,15 +105,36 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
-        if (!GridManager.Instance.IsInsideGrid(targetPos))
+        // Use GridManager's CanMoveTo which respects inspector-configured allowed tiles
+        if (!GridManager.Instance.CanMoveTo(targetPos))
         {
-            Debug.Log("Move blocked: target is outside grid.");
+            Debug.Log($"Move blocked: target {targetPos} is not allowed by GridManager.CanMoveTo.");
             return;
         }
 
-        if (!GridManager.Instance.IsWalkable(targetPos))
+        // If the target tile is occupied, try to push the occupier if it's a Log
+        if (GridManager.Instance.IsOccupied(targetPos))
         {
-            Debug.Log("Move blocked: target tile is not walkable (blocked).");
+            Log log = Object.FindFirstObjectByType<Log>();
+            if (log != null && log.gridPosition == targetPos)
+            {
+                if (log.TryPush(direction))
+                {
+                    gridPosition = targetPos;
+                    transform.position = GridManager.Instance.GridToWorld(gridPosition);
+                }
+                return;
+            }
+
+            // occupied by something we don't know how to push
+            Debug.Log($"Move blocked: target {targetPos} is occupied by an immovable object.");
+            return;
+        }
+
+        // Attempt to atomically move player's occupancy before starting the visual movement
+        if (!GridManager.Instance.MoveOccupant(gridPosition, targetPos))
+        {
+            Debug.Log($"Move failed: could not move occupant from {gridPosition} to {targetPos}.");
             return;
         }
 
