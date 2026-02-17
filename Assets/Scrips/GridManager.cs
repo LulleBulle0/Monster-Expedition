@@ -155,4 +155,25 @@ public class GridManager : MonoBehaviour
         occupiedTiles.Add(to);
         return true;
     }
+
+    // Returns true if the tile is statically blocked (from inspector or map)
+    public bool IsStaticallyBlocked(Vector2Int pos)
+    {
+        return blockedTiles.Contains(pos);
+    }
+
+    // Make a statically blocked tile walkable at runtime (e.g. when a log creates a bridge).
+    // Returns true if the tile was previously blocked and is now unblocked.
+    public bool MakeTileWalkable(Vector2Int pos)
+    {
+        if (blockedTiles.Remove(pos))
+        {
+            // Keep allowedTiles in sync: add this position so CanMoveTo will allow it when appropriate
+            if (allowedTiles == null)
+                allowedTiles = new HashSet<Vector2Int>();
+            allowedTiles.Add(pos);
+            return true;
+        }
+        return false;
+    }
 }

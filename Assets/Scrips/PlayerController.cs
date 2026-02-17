@@ -105,29 +105,37 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
-        // Use GridManager's CanMoveTo which respects inspector-configured allowed tiles
-        if (!GridManager.Instance.CanMoveTo(targetPos))
-        {
-            Debug.Log($"Move blocked: target {targetPos} is not allowed by GridManager.CanMoveTo.");
-            return;
-        }
-
         // If the target tile is occupied, try to push the occupier if it's a Log
         if (GridManager.Instance.IsOccupied(targetPos))
         {
-            Log log = Object.FindFirstObjectByType<Log>();
+            Log log = FindObjectOfType<Log>();
             if (log != null && log.gridPosition == targetPos)
             {
-                if (log.TryPush(direction))
+                // Try to push the log first
+                if (!log.TryPush(direction))
+                    return;
+
+                // After pushing the log, the target tile should be free. Move player's occupancy then start movement.
+                if (!GridManager.Instance.MoveOccupant(gridPosition, targetPos))
                 {
-                    gridPosition = targetPos;
-                    transform.position = GridManager.Instance.GridToWorld(gridPosition);
+                    Debug.Log($"Move failed: could not move occupant from {gridPosition} to {targetPos} after pushing log.");
+                    return;
                 }
+
+                FaceDirection(direction);
+                StartCoroutine(SmoothMoveToTile(targetPos));
                 return;
             }
 
             // occupied by something we don't know how to push
             Debug.Log($"Move blocked: target {targetPos} is occupied by an immovable object.");
+            return;
+        }
+
+        // Use GridManager's CanMoveTo which respects inspector-configured allowed tiles
+        if (!GridManager.Instance.CanMoveTo(targetPos))
+        {
+            Debug.Log($"Move blocked: target {targetPos} is not allowed by GridManager.CanMoveTo.");
             return;
         }
 
@@ -201,12 +209,5 @@ public class PlayerController : MonoBehaviour
 
         isMoving = false;
         Debug.Log($"Player moved to {gridPosition}");
-    }
-
-    // Deprecated single-step Move kept for compatibility but unused now
-    void Move(Vector2Int direction)
-    {
-        // kept to avoid breaking other code; call TryMove instead
-        TryMove(direction);
     }
 }
