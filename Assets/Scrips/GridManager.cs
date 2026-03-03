@@ -114,43 +114,64 @@ public class GridManager : MonoBehaviour
         return occupiedTiles.Contains(pos);
     }
 
-    // Try to register an occupant at `pos`. Returns true on success, false if already occupied or out of bounds or statically blocked.
+    // Try to register an occupant at `pos`. Returns true on success, false if already occupied or out of bounds.
+    // Note: allow registering on statically blocked tiles so movable objects that start there (logs) are tracked.
     public bool RegisterOccupant(Vector2Int pos)
     {
         if (!IsInsideGrid(pos))
+        {
+            Debug.Log($"RegisterOccupant failed: {pos} is outside grid");
             return false;
-        if (blockedTiles.Contains(pos))
-            return false;
+        }
+        // Do not reject registration just because the tile is statically blocked — logs may start on blocked tiles
         if (occupiedTiles.Contains(pos))
+        {
+            Debug.Log($"RegisterOccupant failed: {pos} already occupied");
             return false;
+        }
         occupiedTiles.Add(pos);
+        Debug.Log($"RegisterOccupant: {pos} now occupied. occupiedTiles count={occupiedTiles.Count}");
         return true;
     }
 
     // Unregister occupant at pos. Returns true if removed.
     public bool UnregisterOccupant(Vector2Int pos)
     {
-        return occupiedTiles.Remove(pos);
+        var removed = occupiedTiles.Remove(pos);
+        Debug.Log($"UnregisterOccupant: {pos} removed={removed}. occupiedTiles count={occupiedTiles.Count}");
+        return removed;
     }
 
     // Move an occupant atomically from `from` to `to`.
     // Returns true if moved, false if `to` is occupied or out of bounds or `from` wasn't occupied or `to` is statically blocked.
     public bool MoveOccupant(Vector2Int from, Vector2Int to)
     {
+        Debug.Log($"Attempting MoveOccupant from {from} to {to}");
+
         if (!IsInsideGrid(to) || !IsInsideGrid(from))
+        {
+            Debug.Log("Failed: outside grid");
             return false;
+        }
 
-        // Ensure there's an occupant at 'from'
         if (!occupiedTiles.Contains(from))
-            return false; // nothing occupied at 'from'
+        {
+            Debug.Log("Failed: 'from' tile not occupied");
+            return false;
+        }
 
-        // Destination must not be statically blocked or already occupied
         if (blockedTiles.Contains(to))
+        {
+            Debug.Log("Failed: destination statically blocked");
             return false;
-        if (occupiedTiles.Contains(to))
-            return false;
+        }
 
-        // Perform the move
+        if (occupiedTiles.Contains(to))
+        {
+            Debug.Log("Failed: destination already occupied");
+            return false;
+        }
+
         occupiedTiles.Remove(from);
         occupiedTiles.Add(to);
         return true;
@@ -166,14 +187,52 @@ public class GridManager : MonoBehaviour
     // Returns true if the tile was previously blocked and is now unblocked.
     public bool MakeTileWalkable(Vector2Int pos)
     {
-        if (blockedTiles.Remove(pos))
+        if (!IsInsideGrid(pos))
         {
-            // Keep allowedTiles in sync: add this position so CanMoveTo will allow it when appropriate
+            Debug.Log($"MakeTileWalkable failed: {pos} is outside grid");
+            return false;
+        }
+
+        if (!blockedTiles.Contains(pos))
+        {
+            Debug.Log($"MakeTileWalkable: {pos} was not blocked");
+            return false;
+        }
+
+        bool removed = blockedTiles.Remove(pos);
+        if (removed)
+        {
+            // ensure allowedTiles exists and contains the pos so CanMoveTo will allow it
             if (allowedTiles == null)
                 allowedTiles = new HashSet<Vector2Int>();
             allowedTiles.Add(pos);
+
+            // Make sure it's not marked occupied accidentally
+            if (occupiedTiles.Contains(pos))
+                occupiedTiles.Remove(pos);
+
+            Debug.Log($"MakeTileWalkable: tile {pos} unblocked and now walkable.");
             return true;
         }
+
+        Debug.Log($"MakeTileWalkable failed to remove {pos} from blockedTiles");
         return false;
+    }
+
+    // Compatibility methods requested by user
+    public bool IsBlockedTile(Vector2Int pos)
+    {
+        return IsStaticallyBlocked(pos);
+    }
+
+    public void SetTileWalkable(Vector2Int pos)
+    {
+        MakeTileWalkable(pos);
+    }
+
+    // Optional helper: create a permanent bridge (keeps code intention explicit)
+    public bool CreateBridgeAt(Vector2Int pos)
+    {
+        return MakeTileWalkable(pos);
     }
 }

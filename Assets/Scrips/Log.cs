@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 
 public class Log : MonoBehaviour
 {
@@ -21,81 +21,34 @@ public class Log : MonoBehaviour
 
     public bool TryPush(Vector2Int direction)
     {
-        Vector2Int target = gridPosition + direction;
+        Vector2Int targetPos = gridPosition + direction;
 
-        // If the destination is not currently walkable (water, tree, etc.), and it's a static block (e.g. water/tree),
-        // convert it into a permanent walkable tile and consume this log to create a bridge.
-        if (!GridManager.Instance.IsWalkable(target) && GridManager.Instance.IsStaticallyBlocked(target) && !GridManager.Instance.IsOccupied(target))
+        if (!GridManager.Instance.IsInsideGrid(targetPos))
+            return false;
+
+        // If statically blocked → convert to floor
+        if (GridManager.Instance.IsStaticallyBlocked(targetPos)
+            && !GridManager.Instance.IsOccupied(targetPos))
         {
-            Vector3 targetWorld = GridManager.Instance.GridToWorld(target);
+            Debug.Log("Log creating bridge at " + targetPos);
 
-            // Try to find and destroy a Tree at that world position to make the conversion seamless.
-            Transform[] allTransforms = Object.FindObjectsOfType<Transform>();
-            GameObject foundTree = null;
-            foreach (var t in allTransforms)
-            {
-                if (t == null || t.gameObject == null)
-                    continue;
-
-                if (t.gameObject.name.ToLower().Contains("tree"))
-                {
-                    if (Vector3.Distance(t.position, targetWorld) < 0.6f)
-                    {
-                        foundTree = t.gameObject;
-                        break;
-                    }
-                }
-
-                if (Vector3.Distance(t.position, targetWorld) < 0.1f)
-                {
-                    foundTree = t.gameObject;
-                    break;
-                }
-            }
-
-            if (foundTree != null)
-            {
-                Debug.Log($"Destroying tree '{foundTree.name}' at {target} to make tile walkable.");
-                Object.Destroy(foundTree);
-            }
-            else
-            {
-                Debug.Log($"No tree GameObject found at {targetWorld} but tile is statically blocked; making walkable anyway.");
-            }
-
-            // Remove static block so the tile becomes walkable
-            bool unblocked = GridManager.Instance.MakeTileWalkable(target);
-            Debug.Log($"MakeTileWalkable({target}) returned {unblocked}");
-
-            // Unregister this log's occupancy so the tile it occupied becomes free for the player
+            GridManager.Instance.MakeTileWalkable(targetPos);
             GridManager.Instance.UnregisterOccupant(gridPosition);
 
-            // Optionally: create a visual bridge object here instead of leaving an empty tile.
-            // For now, destroy this log to represent it becoming a static bridge.
-            Debug.Log($"Log at {gridPosition} consumed to create bridge at {target}.");
             Destroy(gameObject);
-
             return true;
         }
 
-        // Check logical grid allows movement
-        if (!GridManager.Instance.CanMoveTo(target))
-        {
-            Debug.Log($"Log push blocked: target {target} is not allowed (CanMoveTo returned false). Current log at {gridPosition}.");
+        // If can't move there normally → fail
+        if (!GridManager.Instance.CanMoveTo(targetPos))
             return false;
-        }
 
-        // Attempt atomic move of occupancy
-        if (GridManager.Instance.MoveOccupant(gridPosition, target))
-        {
-            var previous = gridPosition;
-            gridPosition = target;
-            transform.position = GridManager.Instance.GridToWorld(gridPosition);
-            Debug.Log($"Log pushed from {previous} to {gridPosition}");
-            return true;
-        }
+        if (!GridManager.Instance.MoveOccupant(gridPosition, targetPos))
+            return false;
 
-        Debug.Log($"Log push failed: MoveOccupant returned false from {gridPosition} to {target}.");
-        return false;
+        gridPosition = targetPos;
+        transform.position = GridManager.Instance.GridToWorld(gridPosition);
+
+        return true;
     }
 }

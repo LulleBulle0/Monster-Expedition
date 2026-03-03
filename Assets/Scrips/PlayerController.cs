@@ -21,6 +21,7 @@ public class PlayerController : MonoBehaviour
 
     void Start()
     {
+        Debug.Log("Player registered? " +GridManager.Instance.IsOccupied(gridPosition));
         animator = GetComponent<Animator>();
 
         // Precompute hashes for faster crossfades
@@ -108,12 +109,30 @@ public class PlayerController : MonoBehaviour
         // If the target tile is occupied, try to push the occupier if it's a Log
         if (GridManager.Instance.IsOccupied(targetPos))
         {
-            Log log = FindObjectOfType<Log>();
-            if (log != null && log.gridPosition == targetPos)
+            // Find the log instance that occupies the target tile (support multiple logs)
+            Log[] logs = FindObjectsOfType<Log>();
+            Log occupier = null;
+            foreach (var l in logs)
             {
+                if (l != null && l.gridPosition == targetPos)
+                {
+                    occupier = l;
+                    break;
+                }
+            }
+
+            if (occupier != null)
+            {
+                Debug.Log($"Attempting to push log at {targetPos}");
+
                 // Try to push the log first
-                if (!log.TryPush(direction))
+                if (!occupier.TryPush(direction))
+                {
+                    Debug.Log($"Push of log at {targetPos} failed.");
                     return;
+                }
+
+                Debug.Log($"Push of log at {targetPos} succeeded.");
 
                 // After pushing the log, the target tile should be free. Move player's occupancy then start movement.
                 if (!GridManager.Instance.MoveOccupant(gridPosition, targetPos))
@@ -127,8 +146,8 @@ public class PlayerController : MonoBehaviour
                 return;
             }
 
+            Debug.Log($"Move blocked: target {targetPos} is occupied but no pushable log found.");
             // occupied by something we don't know how to push
-            Debug.Log($"Move blocked: target {targetPos} is occupied by an immovable object.");
             return;
         }
 
@@ -142,6 +161,7 @@ public class PlayerController : MonoBehaviour
         // Attempt to atomically move player's occupancy before starting the visual movement
         if (!GridManager.Instance.MoveOccupant(gridPosition, targetPos))
         {
+            Debug.Log("Player tile occupied? " +GridManager.Instance.IsOccupied(gridPosition));
             Debug.Log($"Move failed: could not move occupant from {gridPosition} to {targetPos}.");
             return;
         }
