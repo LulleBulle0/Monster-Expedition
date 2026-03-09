@@ -138,6 +138,7 @@ public class PlayerController : MonoBehaviour
                 if (!GridManager.Instance.MoveOccupant(gridPosition, targetPos))
                 {
                     Debug.Log($"Move failed: could not move occupant from {gridPosition} to {targetPos} after pushing log.");
+                    GridManager.Instance.RegisterOccupant(targetPos);
                     return;
                 }
 
@@ -187,6 +188,7 @@ public class PlayerController : MonoBehaviour
     IEnumerator SmoothMoveToTile(Vector2Int targetGridPos)
     {
         isMoving = true;
+        gridPosition = targetGridPos;
 
         if (animator != null)
         {
@@ -218,7 +220,7 @@ public class PlayerController : MonoBehaviour
 
         transform.position = endWorld;
         transform.rotation = targetRot;
-        gridPosition = targetGridPos; // commit logical position at end
+        //gridPosition = targetGridPos; // commit logical position at end
 
         if (animator != null)
         {
