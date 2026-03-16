@@ -11,6 +11,7 @@ public class PlayerController : MonoBehaviour
 
     Animator animator;
     bool isMoving;
+    bool isRegistered;
 
     // Animator state names (configure in Inspector if your state names differ)
     public string walkStateName = "Walk";
@@ -21,7 +22,6 @@ public class PlayerController : MonoBehaviour
 
     void Start()
     {
-        Debug.Log("Player registered? " +GridManager.Instance.IsOccupied(gridPosition));
         animator = GetComponent<Animator>();
 
         // Precompute hashes for faster crossfades
@@ -37,6 +37,8 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
+        Debug.Log("Player registered? " + GridManager.Instance.IsOccupied(gridPosition));
+
         // Ensure starting gridPosition is inside the grid
         if (!GridManager.Instance.IsInsideGrid(gridPosition))
         {
@@ -48,7 +50,8 @@ public class PlayerController : MonoBehaviour
         transform.position = GridManager.Instance.GridToWorld(gridPosition);
 
         // Register player as an occupied tile so GridManager knows this tile is taken
-        if (!GridManager.Instance.RegisterOccupant(gridPosition))
+        isRegistered = GridManager.Instance.RegisterOccupant(gridPosition);
+        if (!isRegistered)
         {
             Debug.LogWarning($"Failed to register player at {gridPosition}. Tile may already be occupied or out of bounds.");
         }
@@ -58,8 +61,11 @@ public class PlayerController : MonoBehaviour
 
     void OnDestroy()
     {
-        if (GridManager.Instance != null)
+        if (GridManager.Instance != null && isRegistered)
+        {
             GridManager.Instance.UnregisterOccupant(gridPosition);
+            isRegistered = false;
+        }
     }
 
     void Update()
@@ -138,7 +144,6 @@ public class PlayerController : MonoBehaviour
                 if (!GridManager.Instance.MoveOccupant(gridPosition, targetPos))
                 {
                     Debug.Log($"Move failed: could not move occupant from {gridPosition} to {targetPos} after pushing log.");
-                    GridManager.Instance.RegisterOccupant(targetPos);
                     return;
                 }
 
@@ -162,7 +167,7 @@ public class PlayerController : MonoBehaviour
         // Attempt to atomically move player's occupancy before starting the visual movement
         if (!GridManager.Instance.MoveOccupant(gridPosition, targetPos))
         {
-            Debug.Log("Player tile occupied? " +GridManager.Instance.IsOccupied(gridPosition));
+            Debug.Log("Player tile occupied? " + GridManager.Instance.IsOccupied(gridPosition));
             Debug.Log($"Move failed: could not move occupant from {gridPosition} to {targetPos}.");
             return;
         }
@@ -220,7 +225,6 @@ public class PlayerController : MonoBehaviour
 
         transform.position = endWorld;
         transform.rotation = targetRot;
-        //gridPosition = targetGridPos; // commit logical position at end
 
         if (animator != null)
         {
