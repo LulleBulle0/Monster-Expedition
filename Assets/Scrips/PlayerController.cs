@@ -47,7 +47,10 @@ public class PlayerController : MonoBehaviour
             gridPosition.y = Mathf.Clamp(gridPosition.y, 0, GridManager.Instance.height - 1);
         }
 
-        transform.position = GridManager.Instance.GridToWorld(gridPosition);
+        // Preserve the object's current Y (height) when placing it on the grid
+        var pos = GridManager.Instance.GridToWorld(gridPosition);
+        pos.y = transform.position.y;
+        transform.position = pos;
 
         // Register player as an occupied tile so GridManager knows this tile is taken
         isRegistered = GridManager.Instance.RegisterOccupant(gridPosition);
