@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
+[DefaultExecutionOrder(-200)]
 public class GridManager : MonoBehaviour
 {
     public static GridManager Instance { get; private set; }
@@ -64,6 +65,41 @@ public class GridManager : MonoBehaviour
                 if (!blockedTiles.Contains(pos))
                 {
                     allowedTiles.Add(pos);
+                }
+            }
+        }
+    }
+
+    // New: lets a procedural generator replace the map at runtime.
+    // 1 = land/walkable, 0 = water/hole/not walkable.
+    public void LoadMap(int[,] map)
+    {
+        if (map == null)
+        {
+            Debug.LogError("LoadMap failed: map is null.");
+            return;
+        }
+
+        width = map.GetLength(0);
+        height = map.GetLength(1);
+
+        blockedTiles.Clear();
+        allowedTiles.Clear();
+        occupiedTiles.Clear();
+        logsByTile.Clear();
+
+        for (int x = 0; x < width; x++)
+        {
+            for (int y = 0; y < height; y++)
+            {
+                Vector2Int pos = new Vector2Int(x, y);
+                if (map[x, y] == 1)
+                {
+                    allowedTiles.Add(pos);
+                }
+                else
+                {
+                    blockedTiles.Add(pos);
                 }
             }
         }
