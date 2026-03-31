@@ -6,24 +6,33 @@ public class GridManager : MonoBehaviour
 {
     public static GridManager Instance { get; private set; }
 
+    [Header("Fallback bounds when no land tiles are detected")]
     public int width = 10;
     public int height = 10;
 
-    [SerializeField]
-    private List<Vector2Int> blockedTilesFromInspector = new List<Vector2Int>();
+    [Header("Manual island setup")]
+    [SerializeField] private bool buildWalkableTilesFromScene = true;
+    [SerializeField] private Transform landTilesRoot;
+    [SerializeField] private int boundsPadding = 2;
+
+    [Header("Optional manual overrides")]
+    [SerializeField] private List<Vector2Int> blockedTilesFromInspector = new List<Vector2Int>();
+    [SerializeField] private List<Vector2Int> allowedTilesFromInspector = new List<Vector2Int>();
 
     private HashSet<Vector2Int> blockedTiles = new HashSet<Vector2Int>();
-
-    [SerializeField]
-    private List<Vector2Int> allowedTilesFromInspector = new List<Vector2Int>();
-
     private HashSet<Vector2Int> allowedTiles = new HashSet<Vector2Int>();
-
-    // Tracks all dynamic occupants that currently block movement.
     private HashSet<Vector2Int> occupiedTiles = new HashSet<Vector2Int>();
-
-    // Lets the player instantly look up a pushable log without FindObjectsOfType.
     private Dictionary<Vector2Int, Log> logsByTile = new Dictionary<Vector2Int, Log>();
+
+    private int minGridX;
+    private int maxGridX;
+    private int minGridY;
+    private int maxGridY;
+
+    public int MinGridX { get { return minGridX; } }
+    public int MaxGridX { get { return maxGridX; } }
+    public int MinGridY { get { return minGridY; } }
+    public int MaxGridY { get { return maxGridY; } }
 
     void Awake()
     {
@@ -35,31 +44,71 @@ public class GridManager : MonoBehaviour
         }
 
         Instance = this;
-
-        blockedTiles = new HashSet<Vector2Int>(blockedTilesFromInspector);
-        occupiedTiles.Clear();
-        logsByTile.Clear();
-
-        BuildAllowedTiles();
+        RebuildGridData();
     }
 
-    void BuildAllowedTiles()
+    [ContextMenu("Rebuild Grid Data")]
+    public void RebuildGridData()
     {
-        allowedTiles.Clear();
+        occupiedTiles.Clear();
+        logsByTile.Clear();
+        BuildTileSets();
+    }
 
-        if (allowedTilesFromInspector != null && allowedTilesFromInspector.Count > 0)
+    void BuildTileSets()
+    {
+        HashSet<Vector2Int> inspectorBlocked = new HashSet<Vector2Int>(blockedTilesFromInspector);
+        HashSet<Vector2Int> sourceWalkableTiles = new HashSet<Vector2Int>();
+
+        if (buildWalkableTilesFromScene)
         {
-            allowedTiles = new HashSet<Vector2Int>(allowedTilesFromInspector);
-            foreach (Vector2Int blockedPos in blockedTiles)
+            CollectSceneWalkableTiles(sourceWalkableTiles);
+        }
+
+        if (allowedTilesFromInspector != null)
+        {
+            for (int i = 0; i < allowedTilesFromInspector.Count; i++)
+            {
+                sourceWalkableTiles.Add(allowedTilesFromInspector[i]);
+            }
+        }
+
+        if (sourceWalkableTiles.Count > 0)
+        {
+            BuildBoundsFromTileSet(sourceWalkableTiles, inspectorBlocked);
+
+            allowedTiles = sourceWalkableTiles;
+            foreach (Vector2Int blockedPos in inspectorBlocked)
             {
                 allowedTiles.Remove(blockedPos);
             }
+
+            blockedTiles = new HashSet<Vector2Int>();
+            for (int x = minGridX; x <= maxGridX; x++)
+            {
+                for (int y = minGridY; y <= maxGridY; y++)
+                {
+                    Vector2Int pos = new Vector2Int(x, y);
+                    if (!allowedTiles.Contains(pos))
+                    {
+                        blockedTiles.Add(pos);
+                    }
+                }
+            }
+
             return;
         }
 
-        for (int x = 0; x < width; x++)
+        int safeWidth = Mathf.Max(1, width);
+        int safeHeight = Mathf.Max(1, height);
+        SetBounds(0, safeWidth - 1, 0, safeHeight - 1);
+
+        blockedTiles = inspectorBlocked;
+        allowedTiles = new HashSet<Vector2Int>();
+
+        for (int x = minGridX; x <= maxGridX; x++)
         {
-            for (int y = 0; y < height; y++)
+            for (int y = minGridY; y <= maxGridY; y++)
             {
                 Vector2Int pos = new Vector2Int(x, y);
                 if (!blockedTiles.Contains(pos))
@@ -70,36 +119,138 @@ public class GridManager : MonoBehaviour
         }
     }
 
-    // New: lets a procedural generator replace the map at runtime.
-    // 1 = land/walkable, 0 = water/hole/not walkable.
-    public void LoadMap(int[,] map)
+    void CollectSceneWalkableTiles(HashSet<Vector2Int> outTiles)
     {
-        if (map == null)
+        ManualLandTile[] sceneTiles = null;
+
+        if (landTilesRoot != null)
         {
-            Debug.LogError("LoadMap failed: map is null.");
+            sceneTiles = landTilesRoot.GetComponentsInChildren<ManualLandTile>(true);
+        }
+        else
+        {
+            sceneTiles = FindObjectsOfType<ManualLandTile>();
+        }
+
+        if (sceneTiles == null)
+        {
             return;
         }
 
-        width = map.GetLength(0);
-        height = map.GetLength(1);
-
-        blockedTiles.Clear();
-        allowedTiles.Clear();
-        occupiedTiles.Clear();
-        logsByTile.Clear();
-
-        for (int x = 0; x < width; x++)
+        for (int i = 0; i < sceneTiles.Length; i++)
         {
-            for (int y = 0; y < height; y++)
+            if (sceneTiles[i] == null)
             {
-                Vector2Int pos = new Vector2Int(x, y);
-                if (map[x, y] == 1)
+                continue;
+            }
+
+            outTiles.Add(sceneTiles[i].GridPosition);
+        }
+    }
+
+    void BuildBoundsFromTileSet(HashSet<Vector2Int> walkableTiles, HashSet<Vector2Int> blockedOverrides)
+    {
+        bool hasAnyTile = false;
+        int foundMinX = 0;
+        int foundMaxX = 0;
+        int foundMinY = 0;
+        int foundMaxY = 0;
+
+        foreach (Vector2Int pos in walkableTiles)
+        {
+            if (!hasAnyTile)
+            {
+                foundMinX = pos.x;
+                foundMaxX = pos.x;
+                foundMinY = pos.y;
+                foundMaxY = pos.y;
+                hasAnyTile = true;
+                continue;
+            }
+
+            foundMinX = Mathf.Min(foundMinX, pos.x);
+            foundMaxX = Mathf.Max(foundMaxX, pos.x);
+            foundMinY = Mathf.Min(foundMinY, pos.y);
+            foundMaxY = Mathf.Max(foundMaxY, pos.y);
+        }
+
+        foreach (Vector2Int pos in blockedOverrides)
+        {
+            if (!hasAnyTile)
+            {
+                foundMinX = pos.x;
+                foundMaxX = pos.x;
+                foundMinY = pos.y;
+                foundMaxY = pos.y;
+                hasAnyTile = true;
+                continue;
+            }
+
+            foundMinX = Mathf.Min(foundMinX, pos.x);
+            foundMaxX = Mathf.Max(foundMaxX, pos.x);
+            foundMinY = Mathf.Min(foundMinY, pos.y);
+            foundMaxY = Mathf.Max(foundMaxY, pos.y);
+        }
+
+        if (!hasAnyTile)
+        {
+            int safeWidth = Mathf.Max(1, width);
+            int safeHeight = Mathf.Max(1, height);
+            SetBounds(0, safeWidth - 1, 0, safeHeight - 1);
+            return;
+        }
+
+        int safePadding = Mathf.Max(0, boundsPadding);
+        SetBounds(
+            foundMinX - safePadding,
+            foundMaxX + safePadding,
+            foundMinY - safePadding,
+            foundMaxY + safePadding);
+    }
+
+    void SetBounds(int newMinX, int newMaxX, int newMinY, int newMaxY)
+    {
+        minGridX = newMinX;
+        maxGridX = newMaxX;
+        minGridY = newMinY;
+        maxGridY = newMaxY;
+
+        width = Mathf.Max(1, maxGridX - minGridX + 1);
+        height = Mathf.Max(1, maxGridY - minGridY + 1);
+    }
+
+    void EnsureBoundsContain(Vector2Int pos)
+    {
+        if (IsInsideGrid(pos))
+        {
+            return;
+        }
+
+        int oldMinX = minGridX;
+        int oldMaxX = maxGridX;
+        int oldMinY = minGridY;
+        int oldMaxY = maxGridY;
+
+        SetBounds(
+            Mathf.Min(minGridX, pos.x),
+            Mathf.Max(maxGridX, pos.x),
+            Mathf.Min(minGridY, pos.y),
+            Mathf.Max(maxGridY, pos.y));
+
+        for (int x = minGridX; x <= maxGridX; x++)
+        {
+            for (int y = minGridY; y <= maxGridY; y++)
+            {
+                bool wasInsideOldBounds = x >= oldMinX && x <= oldMaxX && y >= oldMinY && y <= oldMaxY;
+                if (wasInsideOldBounds)
                 {
-                    allowedTiles.Add(pos);
+                    continue;
                 }
-                else
+
+                Vector2Int tile = new Vector2Int(x, y);
+                if (!allowedTiles.Contains(tile))
                 {
-                    blockedTiles.Add(pos);
+                    blockedTiles.Add(tile);
                 }
             }
         }
@@ -110,12 +261,24 @@ public class GridManager : MonoBehaviour
         return new Vector3(gridPos.x, 0f, gridPos.y);
     }
 
-    public bool IsInsideGrid(Vector2Int pos)
+    public Vector2Int WorldToGrid(Vector3 worldPos)
     {
-        return pos.x >= 0 && pos.x < width && pos.y >= 0 && pos.y < height;
+        return new Vector2Int(Mathf.RoundToInt(worldPos.x), Mathf.RoundToInt(worldPos.z));
     }
 
-    public bool IsWalkable(Vector2Int pos)
+    public Vector2Int ClampToBounds(Vector2Int pos)
+    {
+        return new Vector2Int(
+            Mathf.Clamp(pos.x, minGridX, maxGridX),
+            Mathf.Clamp(pos.y, minGridY, maxGridY));
+    }
+
+    public bool IsInsideGrid(Vector2Int pos)
+    {
+        return pos.x >= minGridX && pos.x <= maxGridX && pos.y >= minGridY && pos.y <= maxGridY;
+    }
+
+    public bool IsGroundTile(Vector2Int pos)
     {
         if (!IsInsideGrid(pos))
         {
@@ -127,7 +290,7 @@ public class GridManager : MonoBehaviour
             return false;
         }
 
-        if (occupiedTiles.Contains(pos))
+        if (allowedTiles.Count > 0 && !allowedTiles.Contains(pos))
         {
             return false;
         }
@@ -135,18 +298,13 @@ public class GridManager : MonoBehaviour
         return true;
     }
 
+    public bool IsWalkable(Vector2Int pos)
+    {
+        return IsGroundTile(pos) && !occupiedTiles.Contains(pos);
+    }
+
     public bool CanMoveTo(Vector2Int target)
     {
-        if (!IsInsideGrid(target))
-        {
-            return false;
-        }
-
-        if (allowedTiles != null && allowedTiles.Count > 0)
-        {
-            return allowedTiles.Contains(target) && IsWalkable(target);
-        }
-
         return IsWalkable(target);
     }
 
@@ -158,6 +316,40 @@ public class GridManager : MonoBehaviour
     public bool TryGetLog(Vector2Int pos, out Log log)
     {
         return logsByTile.TryGetValue(pos, out log);
+    }
+
+    public bool TryGetClosestGroundTile(Vector2Int from, out Vector2Int closest)
+    {
+        closest = from;
+
+        if (allowedTiles == null || allowedTiles.Count == 0)
+        {
+            return false;
+        }
+
+        bool found = false;
+        int bestDistance = int.MaxValue;
+
+        foreach (Vector2Int tile in allowedTiles)
+        {
+            int dx = tile.x - from.x;
+            int dy = tile.y - from.y;
+            int distance = dx * dx + dy * dy;
+
+            if (!found || distance < bestDistance)
+            {
+                bestDistance = distance;
+                closest = tile;
+                found = true;
+            }
+        }
+
+        return found;
+    }
+
+    public List<Vector2Int> GetGroundTilesSnapshot()
+    {
+        return new List<Vector2Int>(allowedTiles);
     }
 
     public bool RegisterLog(Log log, Vector2Int pos)
@@ -177,60 +369,44 @@ public class GridManager : MonoBehaviour
         return true;
     }
 
-    // Generic occupancy methods kept for the player and other future actors.
     public bool RegisterOccupant(Vector2Int pos)
     {
-        if (!IsInsideGrid(pos))
+        if (!IsGroundTile(pos))
         {
-            Debug.Log("RegisterOccupant failed: " + pos + " is outside grid");
+            Debug.LogWarning("RegisterOccupant failed: " + pos + " is not a valid ground tile.");
             return false;
         }
 
         if (occupiedTiles.Contains(pos))
         {
-            Debug.Log("RegisterOccupant failed: " + pos + " already occupied");
+            Debug.LogWarning("RegisterOccupant failed: " + pos + " is already occupied.");
             return false;
         }
 
         occupiedTiles.Add(pos);
-        Debug.Log("RegisterOccupant: " + pos + " now occupied. occupiedTiles count=" + occupiedTiles.Count);
         return true;
     }
 
     public bool UnregisterOccupant(Vector2Int pos)
     {
         logsByTile.Remove(pos);
-
-        bool removed = occupiedTiles.Remove(pos);
-        Debug.Log("UnregisterOccupant: " + pos + " removed=" + removed + ". occupiedTiles count=" + occupiedTiles.Count);
-        return removed;
+        return occupiedTiles.Remove(pos);
     }
 
     public bool MoveOccupant(Vector2Int from, Vector2Int to)
     {
-        Debug.Log("Attempting MoveOccupant from " + from + " to " + to);
-
-        if (!IsInsideGrid(from) || !IsInsideGrid(to))
+        if (!IsInsideGrid(from) || !occupiedTiles.Contains(from))
         {
-            Debug.Log("Failed: outside grid");
             return false;
         }
 
-        if (!occupiedTiles.Contains(from))
+        if (!IsGroundTile(to))
         {
-            Debug.Log("Failed: 'from' tile not occupied");
-            return false;
-        }
-
-        if (blockedTiles.Contains(to))
-        {
-            Debug.Log("Failed: destination statically blocked");
             return false;
         }
 
         if (occupiedTiles.Contains(to))
         {
-            Debug.Log("Failed: destination already occupied");
             return false;
         }
 
@@ -249,35 +425,22 @@ public class GridManager : MonoBehaviour
 
     public bool IsStaticallyBlocked(Vector2Int pos)
     {
+        if (!IsInsideGrid(pos))
+        {
+            return true;
+        }
+
         return blockedTiles.Contains(pos);
     }
 
     public bool MakeTileWalkable(Vector2Int pos)
     {
-        if (!IsInsideGrid(pos))
-        {
-            Debug.Log("MakeTileWalkable failed: " + pos + " is outside grid");
-            return false;
-        }
+        EnsureBoundsContain(pos);
 
-        if (!blockedTiles.Contains(pos))
-        {
-            Debug.Log("MakeTileWalkable: " + pos + " was not blocked");
-            return false;
-        }
-
-        bool removed = blockedTiles.Remove(pos);
-        if (!removed)
-        {
-            Debug.Log("MakeTileWalkable failed to remove " + pos + " from blockedTiles");
-            return false;
-        }
-
+        blockedTiles.Remove(pos);
         allowedTiles.Add(pos);
         occupiedTiles.Remove(pos);
         logsByTile.Remove(pos);
-
-        Debug.Log("MakeTileWalkable: tile " + pos + " unblocked and now walkable.");
         return true;
     }
 

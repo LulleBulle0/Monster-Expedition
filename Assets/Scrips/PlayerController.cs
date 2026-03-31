@@ -9,9 +9,13 @@ public class PlayerController : MonoBehaviour
     public Vector2Int gridPosition;
     public float moveDuration = 0.18f;
 
+    [SerializeField] private bool deriveGridPositionFromTransform = true;
+    [SerializeField] private bool snapToNearestGroundIfInvalid = true;
+
     Animator animator;
     bool isMoving;
     bool isRegistered;
+    float baseY;
 
     public string walkStateName = "Walk";
     public string idleStateName = "Idle";
@@ -22,6 +26,7 @@ public class PlayerController : MonoBehaviour
     void Start()
     {
         animator = GetComponent<Animator>();
+        baseY = transform.position.y;
 
         if (animator != null)
         {
@@ -35,21 +40,32 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
-        if (!GridManager.Instance.IsInsideGrid(gridPosition))
+        if (deriveGridPositionFromTransform)
         {
-            Debug.LogWarning("Starting gridPosition " + gridPosition + " is outside the grid. Clamping to valid range.");
-            gridPosition.x = Mathf.Clamp(gridPosition.x, 0, GridManager.Instance.width - 1);
-            gridPosition.y = Mathf.Clamp(gridPosition.y, 0, GridManager.Instance.height - 1);
+            gridPosition = GridManager.Instance.WorldToGrid(transform.position);
         }
 
-        Vector3 pos = GridManager.Instance.GridToWorld(gridPosition);
-        pos.y = transform.position.y;
-        transform.position = pos;
+        if (!GridManager.Instance.IsGroundTile(gridPosition))
+        {
+            Vector2Int fallback;
+            if (snapToNearestGroundIfInvalid && GridManager.Instance.TryGetClosestGroundTile(gridPosition, out fallback))
+            {
+                Debug.LogWarning("Player start tile " + gridPosition + " is not valid. Snapping player to nearest ground tile " + fallback + ".");
+                gridPosition = fallback;
+            }
+            else
+            {
+                Debug.LogError("Player start tile " + gridPosition + " is not valid and no fallback tile was found.");
+                return;
+            }
+        }
+
+        transform.position = GridToWorldWithHeight(gridPosition);
 
         isRegistered = GridManager.Instance.RegisterOccupant(gridPosition);
         if (!isRegistered)
         {
-            Debug.LogWarning("Failed to register player at " + gridPosition + ". Tile may already be occupied or out of bounds.");
+            Debug.LogWarning("Failed to register player at " + gridPosition + ". Tile may already be occupied.");
         }
     }
 
@@ -108,13 +124,11 @@ public class PlayerController : MonoBehaviour
         {
             if (!targetLog.TryPush(direction))
             {
-                Debug.Log("Push of log at " + targetPos + " failed.");
                 return;
             }
 
             if (!GridManager.Instance.MoveOccupant(gridPosition, targetPos))
             {
-                Debug.Log("Move failed: could not move player from " + gridPosition + " to " + targetPos + " after pushing log.");
                 return;
             }
 
@@ -123,21 +137,13 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
-        if (GridManager.Instance.IsOccupied(targetPos))
-        {
-            Debug.Log("Move blocked: target " + targetPos + " is occupied by a non-pushable object.");
-            return;
-        }
-
         if (!GridManager.Instance.CanMoveTo(targetPos))
         {
-            Debug.Log("Move blocked: target " + targetPos + " is not allowed by GridManager.CanMoveTo.");
             return;
         }
 
         if (!GridManager.Instance.MoveOccupant(gridPosition, targetPos))
         {
-            Debug.Log("Move failed: could not move occupant from " + gridPosition + " to " + targetPos + ".");
             return;
         }
 
@@ -153,8 +159,7 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
-        Quaternion targetRot = Quaternion.LookRotation(worldDir, Vector3.up);
-        transform.rotation = targetRot;
+        transform.rotation = Quaternion.LookRotation(worldDir, Vector3.up);
     }
 
     IEnumerator SmoothMoveToTile(Vector2Int targetGridPos)
@@ -169,15 +174,17 @@ public class PlayerController : MonoBehaviour
         }
 
         Vector3 startWorld = transform.position;
-        Vector3 endWorld = GridManager.Instance.GridToWorld(targetGridPos);
+        Vector3 endWorld = GridToWorldWithHeight(targetGridPos);
 
         Quaternion startRot = transform.rotation;
-        Vector3 travelDir = endWorld - startWorld;
-        if (travelDir.sqrMagnitude <= 0.0001f)
+        Vector3 flatTravelDir = endWorld - startWorld;
+        flatTravelDir.y = 0f;
+        if (flatTravelDir.sqrMagnitude <= 0.0001f)
         {
-            travelDir = transform.forward;
+            flatTravelDir = transform.forward;
+            flatTravelDir.y = 0f;
         }
-        Quaternion targetRot = Quaternion.LookRotation(travelDir.normalized, Vector3.up);
+        Quaternion targetRot = Quaternion.LookRotation(flatTravelDir.normalized, Vector3.up);
 
         float elapsed = 0f;
         while (elapsed < moveDuration)
@@ -199,6 +206,12 @@ public class PlayerController : MonoBehaviour
         }
 
         isMoving = false;
-        Debug.Log("Player moved to " + gridPosition);
+    }
+
+    Vector3 GridToWorldWithHeight(Vector2Int targetGridPos)
+    {
+        Vector3 worldPos = GridManager.Instance.GridToWorld(targetGridPos);
+        worldPos.y = baseY;
+        return worldPos;
     }
 }

@@ -5,6 +5,8 @@ public class Log : MonoBehaviour
 {
     public Vector2Int gridPosition;
 
+    [SerializeField] private bool deriveGridPositionFromTransform = true;
+    [SerializeField] private bool snapToNearestGroundIfInvalid = true;
     [SerializeField] private float moveDuration = 0.18f;
     [SerializeField] private float hopHeight = 0.2f;
     [SerializeField] private float bridgeFallDuration = 0.25f;
@@ -42,6 +44,26 @@ public class Log : MonoBehaviour
         baseY = transform.position.y;
         standingRotation = transform.rotation;
 
+        if (deriveGridPositionFromTransform)
+        {
+            gridPosition = GridManager.Instance.WorldToGrid(transform.position);
+        }
+
+        if (!GridManager.Instance.IsGroundTile(gridPosition))
+        {
+            Vector2Int fallback;
+            if (snapToNearestGroundIfInvalid && GridManager.Instance.TryGetClosestGroundTile(gridPosition, out fallback))
+            {
+                Debug.LogWarning("Log start tile " + gridPosition + " is not valid. Snapping log to nearest ground tile " + fallback + ".");
+                gridPosition = fallback;
+            }
+            else
+            {
+                Debug.LogError("Log start tile " + gridPosition + " is not valid and no fallback tile was found.");
+                return;
+            }
+        }
+
         SnapStandingToGrid(gridPosition);
 
         isRegistered = GridManager.Instance.RegisterLog(this, gridPosition);
@@ -68,19 +90,13 @@ public class Log : MonoBehaviour
         }
 
         Vector2Int targetPos = gridPosition + direction;
-        if (!GridManager.Instance.IsInsideGrid(targetPos))
-        {
-            return false;
-        }
 
-        // Pushed into water or a hole: become a bridge.
         if (GridManager.Instance.IsStaticallyBlocked(targetPos) && !GridManager.Instance.IsOccupied(targetPos))
         {
             CreateBridge(targetPos, direction);
             return true;
         }
 
-        // Normal land movement: keep the tree as a 1-tile piece.
         if (!GridManager.Instance.CanMoveTo(targetPos))
         {
             return false;
@@ -98,8 +114,6 @@ public class Log : MonoBehaviour
 
     void CreateBridge(Vector2Int targetPos, Vector2Int direction)
     {
-        Debug.Log("Log creating bridge at " + targetPos);
-
         if (isRegistered)
         {
             GridManager.Instance.UnregisterOccupant(gridPosition);
@@ -164,13 +178,8 @@ public class Log : MonoBehaviour
             yield return null;
         }
 
-        if (!GridManager.Instance.MakeTileWalkable(targetPos))
-        {
-            Debug.LogWarning("Failed to turn bridge tile into a walkable tile at " + targetPos);
-        }
-
-        Vector3 finalWorldPos = GridToWorldWithHeight(targetPos);
-        transform.position = finalWorldPos;
+        GridManager.Instance.MakeTileWalkable(targetPos);
+        transform.position = GridToWorldWithHeight(targetPos);
         state = LogState.Bridge;
     }
 
