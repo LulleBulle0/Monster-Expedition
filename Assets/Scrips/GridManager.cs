@@ -13,14 +13,17 @@ public class GridManager : MonoBehaviour
     [Header("Manual island setup")]
     [SerializeField] private bool buildWalkableTilesFromScene = true;
     [SerializeField] private Transform landTilesRoot;
+    [SerializeField] private bool buildBlockedTilesFromScene = true;
+    [SerializeField] private Transform rockBlockersRoot;
     [SerializeField] private int boundsPadding = 2;
 
     [Header("Optional manual overrides")]
     [SerializeField] private List<Vector2Int> blockedTilesFromInspector = new List<Vector2Int>();
     [SerializeField] private List<Vector2Int> allowedTilesFromInspector = new List<Vector2Int>();
 
-    private HashSet<Vector2Int> blockedTiles = new HashSet<Vector2Int>();
-    private HashSet<Vector2Int> allowedTiles = new HashSet<Vector2Int>();
+    private HashSet<Vector2Int> baseGroundTiles = new HashSet<Vector2Int>();
+    private HashSet<Vector2Int> bridgeTiles = new HashSet<Vector2Int>();
+    private HashSet<Vector2Int> rockBlockedTiles = new HashSet<Vector2Int>();
     private HashSet<Vector2Int> occupiedTiles = new HashSet<Vector2Int>();
     private Dictionary<Vector2Int, Log> logsByTile = new Dictionary<Vector2Int, Log>();
 
@@ -52,17 +55,23 @@ public class GridManager : MonoBehaviour
     {
         occupiedTiles.Clear();
         logsByTile.Clear();
+        bridgeTiles.Clear();
         BuildTileSets();
     }
 
     void BuildTileSets()
     {
-        HashSet<Vector2Int> inspectorBlocked = new HashSet<Vector2Int>(blockedTilesFromInspector);
         HashSet<Vector2Int> sourceWalkableTiles = new HashSet<Vector2Int>();
+        HashSet<Vector2Int> sourceRockTiles = new HashSet<Vector2Int>(blockedTilesFromInspector);
 
         if (buildWalkableTilesFromScene)
         {
             CollectSceneWalkableTiles(sourceWalkableTiles);
+        }
+
+        if (buildBlockedTilesFromScene)
+        {
+            CollectSceneBlockedTiles(sourceRockTiles);
         }
 
         if (allowedTilesFromInspector != null)
@@ -75,27 +84,9 @@ public class GridManager : MonoBehaviour
 
         if (sourceWalkableTiles.Count > 0)
         {
-            BuildBoundsFromTileSet(sourceWalkableTiles, inspectorBlocked);
-
-            allowedTiles = sourceWalkableTiles;
-            foreach (Vector2Int blockedPos in inspectorBlocked)
-            {
-                allowedTiles.Remove(blockedPos);
-            }
-
-            blockedTiles = new HashSet<Vector2Int>();
-            for (int x = minGridX; x <= maxGridX; x++)
-            {
-                for (int y = minGridY; y <= maxGridY; y++)
-                {
-                    Vector2Int pos = new Vector2Int(x, y);
-                    if (!allowedTiles.Contains(pos))
-                    {
-                        blockedTiles.Add(pos);
-                    }
-                }
-            }
-
+            BuildBoundsFromTileSet(sourceWalkableTiles, sourceRockTiles);
+            baseGroundTiles = new HashSet<Vector2Int>(sourceWalkableTiles);
+            rockBlockedTiles = new HashSet<Vector2Int>(sourceRockTiles);
             return;
         }
 
@@ -103,17 +94,17 @@ public class GridManager : MonoBehaviour
         int safeHeight = Mathf.Max(1, height);
         SetBounds(0, safeWidth - 1, 0, safeHeight - 1);
 
-        blockedTiles = inspectorBlocked;
-        allowedTiles = new HashSet<Vector2Int>();
+        rockBlockedTiles = new HashSet<Vector2Int>(sourceRockTiles);
+        baseGroundTiles = new HashSet<Vector2Int>();
 
         for (int x = minGridX; x <= maxGridX; x++)
         {
             for (int y = minGridY; y <= maxGridY; y++)
             {
                 Vector2Int pos = new Vector2Int(x, y);
-                if (!blockedTiles.Contains(pos))
+                if (!rockBlockedTiles.Contains(pos))
                 {
-                    allowedTiles.Add(pos);
+                    baseGroundTiles.Add(pos);
                 }
             }
         }
@@ -121,7 +112,7 @@ public class GridManager : MonoBehaviour
 
     void CollectSceneWalkableTiles(HashSet<Vector2Int> outTiles)
     {
-        ManualLandTile[] sceneTiles = null;
+        ManualLandTile[] sceneTiles;
 
         if (landTilesRoot != null)
         {
@@ -132,11 +123,6 @@ public class GridManager : MonoBehaviour
             sceneTiles = FindObjectsOfType<ManualLandTile>();
         }
 
-        if (sceneTiles == null)
-        {
-            return;
-        }
-
         for (int i = 0; i < sceneTiles.Length; i++)
         {
             if (sceneTiles[i] == null)
@@ -145,6 +131,30 @@ public class GridManager : MonoBehaviour
             }
 
             outTiles.Add(sceneTiles[i].GridPosition);
+        }
+    }
+
+    void CollectSceneBlockedTiles(HashSet<Vector2Int> outTiles)
+    {
+        ManualRockBlocker[] blockers;
+
+        if (rockBlockersRoot != null)
+        {
+            blockers = rockBlockersRoot.GetComponentsInChildren<ManualRockBlocker>(true);
+        }
+        else
+        {
+            blockers = FindObjectsOfType<ManualRockBlocker>();
+        }
+
+        for (int i = 0; i < blockers.Length; i++)
+        {
+            if (blockers[i] == null)
+            {
+                continue;
+            }
+
+            outTiles.Add(blockers[i].GridPosition);
         }
     }
 
@@ -226,34 +236,16 @@ public class GridManager : MonoBehaviour
             return;
         }
 
-        int oldMinX = minGridX;
-        int oldMaxX = maxGridX;
-        int oldMinY = minGridY;
-        int oldMaxY = maxGridY;
-
         SetBounds(
             Mathf.Min(minGridX, pos.x),
             Mathf.Max(maxGridX, pos.x),
             Mathf.Min(minGridY, pos.y),
             Mathf.Max(maxGridY, pos.y));
+    }
 
-        for (int x = minGridX; x <= maxGridX; x++)
-        {
-            for (int y = minGridY; y <= maxGridY; y++)
-            {
-                bool wasInsideOldBounds = x >= oldMinX && x <= oldMaxX && y >= oldMinY && y <= oldMaxY;
-                if (wasInsideOldBounds)
-                {
-                    continue;
-                }
-
-                Vector2Int tile = new Vector2Int(x, y);
-                if (!allowedTiles.Contains(tile))
-                {
-                    blockedTiles.Add(tile);
-                }
-            }
-        }
+    bool IsWalkableSurfaceTile(Vector2Int pos)
+    {
+        return baseGroundTiles.Contains(pos) || bridgeTiles.Contains(pos);
     }
 
     public Vector3 GridToWorld(Vector2Int gridPos)
@@ -285,12 +277,37 @@ public class GridManager : MonoBehaviour
             return false;
         }
 
-        if (blockedTiles.Contains(pos))
+        if (!IsWalkableSurfaceTile(pos))
         {
             return false;
         }
 
-        if (allowedTiles.Count > 0 && !allowedTiles.Contains(pos))
+        if (rockBlockedTiles.Contains(pos))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    public bool IsRockBlocked(Vector2Int pos)
+    {
+        return IsInsideGrid(pos) && rockBlockedTiles.Contains(pos);
+    }
+
+    public bool IsBridgeableGap(Vector2Int pos)
+    {
+        if (!IsInsideGrid(pos))
+        {
+            return false;
+        }
+
+        if (IsWalkableSurfaceTile(pos))
+        {
+            return false;
+        }
+
+        if (rockBlockedTiles.Contains(pos))
         {
             return false;
         }
@@ -322,16 +339,35 @@ public class GridManager : MonoBehaviour
     {
         closest = from;
 
-        if (allowedTiles == null || allowedTiles.Count == 0)
-        {
-            return false;
-        }
-
         bool found = false;
         int bestDistance = int.MaxValue;
 
-        foreach (Vector2Int tile in allowedTiles)
+        foreach (Vector2Int tile in baseGroundTiles)
         {
+            if (!IsGroundTile(tile))
+            {
+                continue;
+            }
+
+            int dx = tile.x - from.x;
+            int dy = tile.y - from.y;
+            int distance = dx * dx + dy * dy;
+
+            if (!found || distance < bestDistance)
+            {
+                bestDistance = distance;
+                closest = tile;
+                found = true;
+            }
+        }
+
+        foreach (Vector2Int tile in bridgeTiles)
+        {
+            if (!IsGroundTile(tile))
+            {
+                continue;
+            }
+
             int dx = tile.x - from.x;
             int dy = tile.y - from.y;
             int distance = dx * dx + dy * dy;
@@ -349,7 +385,59 @@ public class GridManager : MonoBehaviour
 
     public List<Vector2Int> GetGroundTilesSnapshot()
     {
-        return new List<Vector2Int>(allowedTiles);
+        List<Vector2Int> result = new List<Vector2Int>();
+
+        foreach (Vector2Int tile in baseGroundTiles)
+        {
+            if (IsGroundTile(tile))
+            {
+                result.Add(tile);
+            }
+        }
+
+        foreach (Vector2Int tile in bridgeTiles)
+        {
+            if (IsGroundTile(tile) && !result.Contains(tile))
+            {
+                result.Add(tile);
+            }
+        }
+
+        return result;
+    }
+
+    public List<Vector2Int> GetBridgeTilesSnapshot()
+    {
+        return new List<Vector2Int>(bridgeTiles);
+    }
+
+    public void RestoreBridgeTiles(List<Vector2Int> restoredBridgeTiles)
+    {
+        bridgeTiles.Clear();
+
+        if (restoredBridgeTiles == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < restoredBridgeTiles.Count; i++)
+        {
+            Vector2Int pos = restoredBridgeTiles[i];
+            EnsureBoundsContain(pos);
+
+            if (rockBlockedTiles.Contains(pos) || baseGroundTiles.Contains(pos))
+            {
+                continue;
+            }
+
+            bridgeTiles.Add(pos);
+        }
+    }
+
+    public void ClearOccupants()
+    {
+        occupiedTiles.Clear();
+        logsByTile.Clear();
     }
 
     public bool RegisterLog(Log log, Vector2Int pos)
@@ -430,17 +518,24 @@ public class GridManager : MonoBehaviour
             return true;
         }
 
-        return blockedTiles.Contains(pos);
+        return rockBlockedTiles.Contains(pos) || !IsWalkableSurfaceTile(pos);
     }
 
     public bool MakeTileWalkable(Vector2Int pos)
     {
         EnsureBoundsContain(pos);
 
-        blockedTiles.Remove(pos);
-        allowedTiles.Add(pos);
-        occupiedTiles.Remove(pos);
-        logsByTile.Remove(pos);
+        if (rockBlockedTiles.Contains(pos))
+        {
+            Debug.LogWarning("MakeTileWalkable failed: " + pos + " is a rock-blocked tile.");
+            return false;
+        }
+
+        if (!baseGroundTiles.Contains(pos))
+        {
+            bridgeTiles.Add(pos);
+        }
+
         return true;
     }
 

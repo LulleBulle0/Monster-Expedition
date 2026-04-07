@@ -23,6 +23,11 @@ public class PlayerController : MonoBehaviour
     int walkStateHash;
     int idleStateHash;
 
+    public bool IsBusy
+    {
+        get { return isMoving; }
+    }
+
     void Start()
     {
         animator = GetComponent<Animator>();
@@ -89,6 +94,14 @@ public class PlayerController : MonoBehaviour
         Keyboard kb = Keyboard.current;
         if (kb != null)
         {
+            if (kb.zKey.wasPressedThisFrame || kb.backspaceKey.wasPressedThisFrame)
+            {
+                if (UndoManager.Instance != null && UndoManager.Instance.TryUndo(this))
+                {
+                    return;
+                }
+            }
+
             if (kb.wKey.wasPressedThisFrame || kb.upArrowKey.wasPressedThisFrame)
                 TryMove(Vector2Int.up);
             else if (kb.sKey.wasPressedThisFrame || kb.downArrowKey.wasPressedThisFrame)
@@ -99,6 +112,14 @@ public class PlayerController : MonoBehaviour
                 TryMove(Vector2Int.right);
         }
 #else
+        if (Input.GetKeyDown(KeyCode.Z) || Input.GetKeyDown(KeyCode.Backspace))
+        {
+            if (UndoManager.Instance != null && UndoManager.Instance.TryUndo(this))
+            {
+                return;
+            }
+        }
+
         if (Input.GetKeyDown(KeyCode.W) || Input.GetKeyDown(KeyCode.UpArrow))
             TryMove(Vector2Int.up);
         else if (Input.GetKeyDown(KeyCode.S) || Input.GetKeyDown(KeyCode.DownArrow))
@@ -110,6 +131,28 @@ public class PlayerController : MonoBehaviour
 #endif
     }
 
+    public void RestoreFromUndo(Vector2Int restoredGridPosition, Vector3 restoredWorldPosition, Quaternion restoredRotation)
+    {
+        StopAllCoroutines();
+        isMoving = false;
+        isRegistered = false;
+
+        gridPosition = restoredGridPosition;
+        transform.position = restoredWorldPosition;
+        transform.rotation = restoredRotation;
+
+        if (animator != null)
+        {
+            animator.SetBool("IsWalking", false);
+            animator.CrossFadeInFixedTime(idleStateHash, 0.05f, 0);
+        }
+    }
+
+    public void SetRegisteredFromUndo(bool registered)
+    {
+        isRegistered = registered;
+    }
+
     void TryMove(Vector2Int direction)
     {
         if (isMoving || GridManager.Instance == null)
@@ -118,10 +161,16 @@ public class PlayerController : MonoBehaviour
         }
 
         Vector2Int targetPos = gridPosition + direction;
+        UndoManager.UndoState pendingUndoState = null;
 
         Log targetLog;
         if (GridManager.Instance.TryGetLog(targetPos, out targetLog))
         {
+            if (UndoManager.Instance != null)
+            {
+                pendingUndoState = UndoManager.Instance.CaptureState(this);
+            }
+
             if (!targetLog.TryPush(direction))
             {
                 return;
@@ -129,7 +178,16 @@ public class PlayerController : MonoBehaviour
 
             if (!GridManager.Instance.MoveOccupant(gridPosition, targetPos))
             {
+                if (UndoManager.Instance != null && pendingUndoState != null)
+                {
+                    UndoManager.Instance.RestoreState(this, pendingUndoState);
+                }
                 return;
+            }
+
+            if (UndoManager.Instance != null && pendingUndoState != null)
+            {
+                UndoManager.Instance.PushCapturedState(pendingUndoState);
             }
 
             FaceDirection(direction);
@@ -142,9 +200,19 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
+        if (UndoManager.Instance != null)
+        {
+            pendingUndoState = UndoManager.Instance.CaptureState(this);
+        }
+
         if (!GridManager.Instance.MoveOccupant(gridPosition, targetPos))
         {
             return;
+        }
+
+        if (UndoManager.Instance != null && pendingUndoState != null)
+        {
+            UndoManager.Instance.PushCapturedState(pendingUndoState);
         }
 
         FaceDirection(direction);

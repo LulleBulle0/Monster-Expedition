@@ -5,11 +5,20 @@ public class Log : MonoBehaviour
 {
     public Vector2Int gridPosition;
 
+    [Header("Startup")]
     [SerializeField] private bool deriveGridPositionFromTransform = true;
     [SerializeField] private bool snapToNearestGroundIfInvalid = true;
+
+    [Header("Standing Move")]
     [SerializeField] private float moveDuration = 0.18f;
     [SerializeField] private float hopHeight = 0.2f;
+
+    [Header("Bridge Fall")]
     [SerializeField] private float bridgeFallDuration = 0.25f;
+    [SerializeField] private float bridgePivotForwardOffset = 0.5f;
+    [SerializeField] private float bridgePivotDownOffset = 0.5f;
+    [SerializeField] private float bridgeFinalForwardOffset = 0f;
+    [SerializeField] private float bridgeFinalHeightOffset = -0.05f;
 
     private bool isRegistered;
     private Quaternion standingRotation;
@@ -91,7 +100,7 @@ public class Log : MonoBehaviour
 
         Vector2Int targetPos = gridPosition + direction;
 
-        if (GridManager.Instance.IsStaticallyBlocked(targetPos) && !GridManager.Instance.IsOccupied(targetPos))
+        if (GridManager.Instance.IsBridgeableGap(targetPos) && !GridManager.Instance.IsOccupied(targetPos))
         {
             CreateBridge(targetPos, direction);
             return true;
@@ -112,8 +121,30 @@ public class Log : MonoBehaviour
         return true;
     }
 
+    public void RestoreFromUndo(Vector2Int restoredGridPosition, Vector3 restoredWorldPosition, Quaternion restoredRotation, bool restoredIsBridge)
+    {
+        StopAllCoroutines();
+
+        gridPosition = restoredGridPosition;
+        transform.position = restoredWorldPosition;
+        transform.rotation = restoredRotation;
+
+        state = restoredIsBridge ? LogState.Bridge : LogState.Standing;
+        isRegistered = false;
+    }
+
+    public void SetRegisteredFromUndo(bool registered)
+    {
+        isRegistered = registered;
+    }
+
     void CreateBridge(Vector2Int targetPos, Vector2Int direction)
     {
+        if (!GridManager.Instance.MakeTileWalkable(targetPos))
+        {
+            return;
+        }
+
         if (isRegistered)
         {
             GridManager.Instance.UnregisterOccupant(gridPosition);
@@ -129,7 +160,7 @@ public class Log : MonoBehaviour
         state = LogState.Moving;
 
         Vector3 startWorld = transform.position;
-        Vector3 endWorld = GridToWorldWithHeight(targetPos);
+        Vector3 endWorld = GridToWorldStanding(targetPos);
 
         float elapsed = 0f;
         while (elapsed < moveDuration)
@@ -154,8 +185,10 @@ public class Log : MonoBehaviour
     {
         state = LogState.Moving;
 
-        Vector3 moveDir = new Vector3(direction.x, 0f, direction.y);
-        Vector3 pivot = transform.position + (moveDir + Vector3.down) * 0.5f;
+        Vector3 moveDir = new Vector3(direction.x, 0f, direction.y).normalized;
+        Vector3 pivot = transform.position
+                        + moveDir * bridgePivotForwardOffset
+                        + Vector3.down * bridgePivotDownOffset;
         Vector3 axis = Vector3.Cross(Vector3.up, moveDir);
 
         float elapsed = 0f;
@@ -179,20 +212,28 @@ public class Log : MonoBehaviour
         }
 
         GridManager.Instance.MakeTileWalkable(targetPos);
-        transform.position = GridToWorldWithHeight(targetPos);
+        transform.position = GridToWorldBridge(targetPos, moveDir);
         state = LogState.Bridge;
     }
 
     void SnapStandingToGrid(Vector2Int targetPos)
     {
-        transform.position = GridToWorldWithHeight(targetPos);
+        transform.position = GridToWorldStanding(targetPos);
         transform.rotation = standingRotation;
     }
 
-    Vector3 GridToWorldWithHeight(Vector2Int targetPos)
+    Vector3 GridToWorldStanding(Vector2Int targetPos)
     {
         Vector3 worldPos = GridManager.Instance.GridToWorld(targetPos);
         worldPos.y = baseY;
+        return worldPos;
+    }
+
+    Vector3 GridToWorldBridge(Vector2Int targetPos, Vector3 moveDir)
+    {
+        Vector3 worldPos = GridManager.Instance.GridToWorld(targetPos);
+        worldPos += moveDir * bridgeFinalForwardOffset;
+        worldPos.y = baseY + bridgeFinalHeightOffset;
         return worldPos;
     }
 }
