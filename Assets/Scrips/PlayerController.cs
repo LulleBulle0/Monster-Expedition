@@ -17,12 +17,6 @@ public class PlayerController : MonoBehaviour
     bool isRegistered;
     float baseY;
 
-    public string walkStateName = "Walk";
-    public string idleStateName = "Idle";
-
-    int walkStateHash;
-    int idleStateHash;
-
     public bool IsBusy
     {
         get { return isMoving; }
@@ -32,12 +26,6 @@ public class PlayerController : MonoBehaviour
     {
         animator = GetComponent<Animator>();
         baseY = transform.position.y;
-
-        if (animator != null)
-        {
-            walkStateHash = Animator.StringToHash(walkStateName);
-            idleStateHash = Animator.StringToHash(idleStateName);
-        }
 
         if (GridManager.Instance == null)
         {
@@ -71,6 +59,11 @@ public class PlayerController : MonoBehaviour
         if (!isRegistered)
         {
             Debug.LogWarning("Failed to register player at " + gridPosition + ". Tile may already be occupied.");
+        }
+
+        if (animator != null)
+        {
+            animator.SetBool("IsWalking", false);
         }
     }
 
@@ -144,7 +137,6 @@ public class PlayerController : MonoBehaviour
         if (animator != null)
         {
             animator.SetBool("IsWalking", false);
-            animator.CrossFadeInFixedTime(idleStateHash, 0.05f, 0);
         }
     }
 
@@ -238,7 +230,6 @@ public class PlayerController : MonoBehaviour
         if (animator != null)
         {
             animator.SetBool("IsWalking", true);
-            animator.CrossFadeInFixedTime(walkStateHash, 0.05f, 0);
         }
 
         Vector3 startWorld = transform.position;
@@ -270,7 +261,6 @@ public class PlayerController : MonoBehaviour
         if (animator != null)
         {
             animator.SetBool("IsWalking", false);
-            animator.CrossFadeInFixedTime(idleStateHash, 0.05f, 0);
         }
 
         isMoving = false;
