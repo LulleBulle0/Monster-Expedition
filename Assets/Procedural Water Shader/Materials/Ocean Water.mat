@@ -74,12 +74,12 @@ Material:
     - _EdgeFoamWidth: 2
     - _FoamCrestIntensity: 1.8
     - _FoamCrestThreshold: 0.18
-    - _FoamIntensity: 1.6
+    - _FoamIntensity: 0.59
     - _FoamNoiseScale: 0.75
     - _FoamNoiseSpeed: 1.25
     - _FresnelBias: 0.06
     - _FresnelPower: 3.2
-    - _FresnelScale: 1.6
+    - _FresnelScale: 1.31
     - _GerstnerIntensity: 1.25
     - _GlossMapScale: 1
     - _Glossiness: 0.5
@@ -95,7 +95,7 @@ Material:
     - _RippleScale: 0.45
     - _RippleSpeed: 0.69
     - _RippleStrength: 0.371
-    - _Shininess: 90
+    - _Shininess: 61
     - _ShoreDepth: 2.2
     - _SmoothnessTextureChannel: 0
     - _SpecularHighlights: 1
